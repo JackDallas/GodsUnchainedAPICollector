@@ -1,8 +1,8 @@
 name: Process Matches
 
 on:
-  schedule:
-    - cron: '21 * * * *'
+  # schedule:
+  #   - cron: '21 1 1 1 *'
 
 jobs:
   build:
