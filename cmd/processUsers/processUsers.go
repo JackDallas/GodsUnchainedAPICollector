@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,7 +55,7 @@ func PropertiesEndpointProcessing() {
 func UploadToIDSToUsernames(result guapi.PropertiesResponse) {
 	blankNames := make([]guapi.UserRecord, 0)
 	fmt.Println("Uploading to IDS TO USERNAMES")
-	usernameToID := make(map[int64]string)
+	IDToUsername := make(map[int64]string)
 	for _, user := range result.Records {
 		if user.Username == "" {
 			// fmt.Printf("Blank Username (%s) skipping...\n", user.Username)
@@ -72,23 +72,12 @@ func UploadToIDSToUsernames(result guapi.PropertiesResponse) {
 			blankNames = append(blankNames, user)
 			continue
 		}
-		if name, ok := usernameToID[user.UserID]; ok {
+		if name, ok := IDToUsername[user.UserID]; ok {
 			fmt.Printf("UserID %d already exists as %s, new name would have been %s\n", user.UserID, name, user.Username)
 		} else {
-			usernameToID[user.UserID] = user.Username
+			IDToUsername[user.UserID] = user.Username
 		}
 	}
-	//Dump usernameToID to file
-	fmt.Println("Dumping to file...")
-	bytes, err := json.Marshal(usernameToID)
-	if err != nil {
-		panic(err)
-	}
-	err = ioutil.WriteFile("usernameToID.json", bytes, 0644)
-	if err != nil {
-		panic(err)
-	}
-
 	fmt.Printf("BlankNames: %d\n", len(blankNames))
 	for _, user := range blankNames {
 		fmt.Printf("%d\n", user.UserID)
@@ -102,7 +91,7 @@ func UploadToIDSToUsernames(result guapi.PropertiesResponse) {
 	ctx := context.Background()
 	limiter := make(chan struct{}, 4)
 
-	for k, v := range usernameToID {
+	for k, v := range IDToUsername {
 		wg.Add(1)
 		go handleKVUpload(&wg, limiter, strconv.FormatInt(k, 10), []byte(url.QueryEscape(v)), cfapi.GU_ID_TO_USERNAME, api, &ctx)
 	}
@@ -119,11 +108,17 @@ func handleKVUpload(wg *sync.WaitGroup, sema chan struct{}, k string, v []byte, 
 		wg.Done()
 	}()
 	//
-	time.Sleep(time.Duration(300 * time.Millisecond))
+	time.Sleep(time.Duration(500 * time.Millisecond))
 	_, err := api.WriteWorkersKV(*ctx, namespace, k, v)
 	if err != nil {
-		fmt.Printf("Error writing %s: %s\n", k, err)
-		panic(err)
+		if strings.Contains(err.Error(), "429") {
+			fmt.Printf("429 error, sleeping thread for 5 seconds...\n")
+			time.Sleep(time.Duration(5 * time.Second))
+			go handleKVUpload(wg, sema, k, v, namespace, api, ctx)
+		} else {
+			fmt.Printf("Error writing %s: %s\n", k, err)
+			panic(err)
+		}
 	}
 }
 
