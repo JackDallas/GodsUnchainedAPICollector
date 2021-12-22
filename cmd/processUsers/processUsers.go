@@ -120,7 +120,6 @@ func handleKVUpload(wg *sync.WaitGroup, sema chan struct{}, k string, v []byte, 
 	}()
 	//
 	time.Sleep(time.Duration(300 * time.Millisecond))
-	fmt.Printf("Uploading %s\n", k)
 	_, err := api.WriteWorkersKV(*ctx, namespace, k, v)
 	if err != nil {
 		fmt.Printf("Error writing %s: %s\n", k, err)

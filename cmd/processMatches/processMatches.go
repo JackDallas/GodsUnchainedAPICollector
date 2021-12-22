@@ -132,11 +132,9 @@ func main() {
 	for k, v := range gu_matches_by_user_id {
 		wg.Add(1)
 		go func(k int, v []string, ctx *context.Context, wg *sync.WaitGroup) {
-			fmt.Printf("Processing user (%d/%d) %d\n", currentUserRecord, totalUserRecords, k)
 			//Check for existing record on cloudflare kv
 			res, err := api.ReadWorkersKV(*ctx, cfapi.GU_USER_MATCHES, strconv.FormatInt(int64(k), 10))
 			if err == nil {
-				fmt.Printf("Found existing record for user %d\n", k)
 				//Record exists
 				var currentRecord []string
 				err = json.Unmarshal(res, &currentRecord)
@@ -153,7 +151,6 @@ func main() {
 				api.WriteWorkersKV(*ctx, cfapi.GU_USER_MATCHES, fmt.Sprintf("%d", k), currentRecordJson)
 			} else {
 				if err.Error() == cfapi.ERROR_NO_KEY_FOUND {
-					fmt.Printf("No existing record found for %s, creating...\n", fmt.Sprintf("%d", k))
 					//Record does not exist, create it
 					valueJSON, err := json.Marshal(v)
 					if err != nil {
