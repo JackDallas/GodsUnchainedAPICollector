@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/url"
@@ -18,22 +17,12 @@ import (
 	"github.com/JackDallas/Gods_Unchained_User_Lookup/pkg/guapi"
 )
 
-var nameToID bool
-var IDToName bool
-
 func main() {
-	// Parse arguments
-	flag.BoolVar(&nameToID, "nameToID", false, "upload to username to user id")
-	flag.BoolVar(&IDToName, "IDToName", false, "upload to user id to username")
-	flag.Parse()
-
 	//Time exectution
 	start := time.Now()
 	fmt.Printf("Starting...\n")
 
-	if nameToID || IDToName {
-		PropertiesEndpointProcessing()
-	}
+	PropertiesEndpointProcessing()
 
 	//Time execution
 	elapsed := time.Since(start)
@@ -54,17 +43,13 @@ func PropertiesEndpointProcessing() {
 		panic(err)
 	}
 
-	if nameToID {
-		fmt.Printf("Uploading %d records to CF USERNAMES to IDS\n", len(props.Records))
-		utils.PrintMemUsage()
-		UploadToUsernamesToIDS(props, &props)
-	}
+	fmt.Printf("Uploading %d records to CF USERNAMES to IDS\n", len(props.Records))
+	utils.PrintMemUsage()
+	UploadToUsernamesToIDS(props, &props)
 
-	if IDToName {
-		fmt.Printf("Uploading %d records to IDS TO USERNAMES\n", len(props.Records))
-		utils.PrintMemUsage()
-		UploadToIDSToUsernames(props)
-	}
+	fmt.Printf("Uploading %d records to IDS TO USERNAMES\n", len(props.Records))
+	utils.PrintMemUsage()
+	UploadToIDSToUsernames(props)
 }
 
 func UploadToIDSToUsernames(result guapi.PropertiesResponse) {
