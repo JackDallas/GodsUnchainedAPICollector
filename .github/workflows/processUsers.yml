@@ -4,11 +4,9 @@ on:
   push:
   pull_request:
   schedule:
-    - cron: '21 * * * *'
-
+    - cron: '41 * * * *'
 
 jobs:
-  # Create all builds for various platforms
   build:
     runs-on: ubuntu-latest
 
