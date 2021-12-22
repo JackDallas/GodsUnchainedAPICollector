@@ -1,4 +1,4 @@
-name: Update KV
+name: Process Users
 
 on:  
   push:
