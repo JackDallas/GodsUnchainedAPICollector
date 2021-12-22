@@ -1,8 +1,6 @@
 name: Process Users
 
-on:  
-  push:
-  pull_request:
+on:
   schedule:
     - cron: '41 * * * *'
 
