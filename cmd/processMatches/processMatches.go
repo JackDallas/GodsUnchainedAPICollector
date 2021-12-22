@@ -123,7 +123,6 @@ func main() {
 	fmt.Println("Completed GU_MATCHES bulk write")
 	utils.PrintMemUsage()
 	fmt.Printf("Iterating over GU_MATCHES_BY_USER_ID \n")
-	totalUserRecords := len(gu_matches_by_user_id)
 	currentUserRecord := 0
 
 	ctx := context.Background()
