@@ -1,14 +1,10 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
-	"strings"
-	"sync"
-	"time"
 
 	"github.com/cloudflare/cloudflare-go"
 
@@ -17,19 +13,7 @@ import (
 	"github.com/JackDallas/Gods_Unchained_User_Lookup/pkg/guapi"
 )
 
-func main() {
-	//Time exectution
-	start := time.Now()
-	fmt.Printf("Starting...\n")
-
-	PropertiesEndpointProcessing()
-
-	//Time execution
-	elapsed := time.Since(start)
-	fmt.Printf("Completed in %s\n", elapsed)
-}
-
-func PropertiesEndpointProcessing() {
+func ProcessUsers(cfapiw *cfapi.CFAPI) {
 	var props guapi.PropertiesResponse
 	propsURL := guapi.PropertiesRequestURL(1, 1)
 	err := utils.GetAndDecode(propsURL, &props)
@@ -45,17 +29,19 @@ func PropertiesEndpointProcessing() {
 
 	fmt.Printf("Uploading %d records to CF USERNAMES to IDS\n", len(props.Records))
 	utils.PrintMemUsage()
-	UploadToUsernamesToIDS(props, &props)
+	UploadToUsernamesToIDS(props, &props, cfapiw)
 
 	fmt.Printf("Uploading %d records to IDS TO USERNAMES\n", len(props.Records))
 	utils.PrintMemUsage()
-	UploadToIDSToUsernames(props)
+	UploadToIDToUsernames(props, cfapiw)
 }
 
-func UploadToIDSToUsernames(result guapi.PropertiesResponse) {
+func UploadToIDToUsernames(result guapi.PropertiesResponse, cfapiw *cfapi.CFAPI) {
+	fmt.Println("Processing to ID TO USERNAMES")
+
 	blankNames := make([]guapi.UserRecord, 0)
-	fmt.Println("Uploading to IDS TO USERNAMES")
-	IDToUsername := make(map[int64]string)
+	IDToUsernamePairs := []cloudflare.WorkersKVPair{}
+
 	for _, user := range result.Records {
 		if user.Username == "" {
 			// fmt.Printf("Blank Username (%s) skipping...\n", user.Username)
@@ -72,57 +58,23 @@ func UploadToIDSToUsernames(result guapi.PropertiesResponse) {
 			blankNames = append(blankNames, user)
 			continue
 		}
-		if name, ok := IDToUsername[user.UserID]; ok {
-			fmt.Printf("UserID %d already exists as %s, new name would have been %s\n", user.UserID, name, user.Username)
-		} else {
-			IDToUsername[user.UserID] = user.Username
-		}
+		IDToUsernamePairs = append(IDToUsernamePairs, cloudflare.WorkersKVPair{
+			Key:   strconv.FormatInt(user.UserID, 10),
+			Value: user.Username,
+		})
 	}
+
 	fmt.Printf("BlankNames: %d\n", len(blankNames))
 	for _, user := range blankNames {
 		fmt.Printf("%d\n", user.UserID)
 	}
-	api, err := cfapi.New()
-	if err != nil {
-		panic(err)
-	}
 
-	var wg sync.WaitGroup
-	ctx := context.Background()
-	limiter := make(chan struct{}, 4)
+	fmt.Println("Uploading to ID TO USERNAMES")
 
-	for k, v := range IDToUsername {
-		wg.Add(1)
-		go handleKVUpload(&wg, limiter, strconv.FormatInt(k, 10), []byte(url.QueryEscape(v)), cfapi.GU_ID_TO_USERNAME, api, &ctx)
-	}
-
-	fmt.Println("All added waiting...")
-	wg.Wait()
-	fmt.Println("Process complete.")
+	cfapiw.KVBulkWrite(IDToUsernamePairs, cfapi.GU_ID_TO_USERNAME)
 }
 
-func handleKVUpload(wg *sync.WaitGroup, sema chan struct{}, k string, v []byte, namespace string, api *cloudflare.API, ctx *context.Context) {
-	sema <- struct{}{}
-	defer func() {
-		<-sema
-		wg.Done()
-	}()
-	//
-	time.Sleep(time.Duration(500 * time.Millisecond))
-	_, err := api.WriteWorkersKV(*ctx, namespace, k, v)
-	if err != nil {
-		if strings.Contains(err.Error(), "429") {
-			fmt.Printf("429 error, sleeping thread for 5 seconds...\n")
-			time.Sleep(time.Duration(5 * time.Second))
-			go handleKVUpload(wg, sema, k, v, namespace, api, ctx)
-		} else {
-			fmt.Printf("Error writing %s: %s\n", k, err)
-			panic(err)
-		}
-	}
-}
-
-func UploadToUsernamesToIDS(result guapi.PropertiesResponse, props *guapi.PropertiesResponse) {
+func UploadToUsernamesToIDS(result guapi.PropertiesResponse, props *guapi.PropertiesResponse, cfapiw *cfapi.CFAPI) {
 	records := make(map[string][]guapi.UserRecord)
 
 	utils.PrintMemUsage()
@@ -164,12 +116,7 @@ func UploadToUsernamesToIDS(result guapi.PropertiesResponse, props *guapi.Proper
 	fmt.Printf("Uploading %d records to CF USERNAMES to IDS\n", len(pairs))
 	utils.PrintMemUsage()
 
-	api, err := cfapi.New()
-	if err != nil {
-		panic(err)
-	}
-
-	cfapi.ThreadedKVBulkWrite(api, pairs, cfapi.GU_USERNAME_TO_ID)
+	cfapiw.KVBulkWrite(pairs, cfapi.GU_USERNAME_TO_ID)
 
 	fmt.Println("Process complete.")
 }

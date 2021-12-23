@@ -19,21 +19,44 @@ const (
 	GU_USERNAME_TO_ID  = "8b93ddd7666d48d5bc610c49827611df"
 )
 
-func New() (*cloudflare.API, error) {
-	api, err := cloudflare.New(os.Getenv("CLOUDFLARE_API_KEY"), os.Getenv("CLOUDFLARE_API_EMAIL"))
-	if err != nil {
-		return api, err
-	}
-	api.AccountID = os.Getenv("CLOUDFLARE_ACCOUNT_ID")
-	return api, err
+type CFAPI struct {
+	Api *cloudflare.API
+	// Ticker that takes 1 off Requests 1200 times over 5 minutes
+	Ticker *time.Ticker
+	// Request freed channel
+	RequestFreed chan bool
 }
 
-func ThreadedKVBulkWrite(api *cloudflare.API, records []cloudflare.WorkersKVPair, namespaceID string) error {
+func New() (*CFAPI, error) {
+	api, err := cloudflare.New(os.Getenv("CLOUDFLARE_API_KEY"), os.Getenv("CLOUDFLARE_API_EMAIL"))
+	if err != nil {
+		return nil, err
+	}
+	api.AccountID = os.Getenv("CLOUDFLARE_ACCOUNT_ID")
+	cfapiw := &CFAPI{api, time.NewTicker((time.Minute * 5 / 1200)), make(chan bool, 1200)}
+	// Queue initial requests, slightly less for sanity's sake
+	for i := 0; i < 1100; i++ {
+		cfapiw.RequestFreed <- true
+	}
+
+	go cfapiw.rateLimit()
+	return cfapiw, nil
+}
+
+func (cfapiw *CFAPI) rateLimit() {
+	// Wait for the ticker to tick
+	for range cfapiw.Ticker.C {
+		// Add free request to channel
+		cfapiw.RequestFreed <- true
+	}
+}
+
+func (cfapi *CFAPI) KVBulkWrite(records []cloudflare.WorkersKVPair, namespaceID string) error {
+	// get freed request from channel
+	<-cfapi.RequestFreed
+
+	// Create a context
 	ctx := context.Background()
-	threads := 0
-	threadsTotal := 0
-	//Create channel for threads to send to
-	done := make(chan bool)
 
 	payload := cloudflare.WorkersKVBulkWriteRequest{}
 	fmt.Printf("Building Payloads\n")
@@ -42,39 +65,28 @@ func ThreadedKVBulkWrite(api *cloudflare.API, records []cloudflare.WorkersKVPair
 		if len(payload) == 10000 || i == len(records)-1 {
 			fmt.Printf("Writing %d records, completed: %d records\n", len(payload), i-len(payload))
 			utils.PrintMemUsage()
-			threads++
-			threadsTotal++
-			go func(payload cloudflare.WorkersKVBulkWriteRequest, done chan bool) {
-				resp, err := api.WriteWorkersKVBulk(context.Background(), namespaceID, payload)
-				if err != nil {
-					fmt.Printf("Error writing to API: %v\n", err)
-					ChunkUploadPayload(payload, api, &ctx, len(payload)/4, namespaceID)
-				} else {
-					fmt.Printf("%+v\n", resp)
-				}
-				done <- true
-			}(payload, done)
-			if i != len(records)-1 {
-				// Sleep if not on last call
-				fmt.Println("Fired thread, cooling for 2 seconds...")
-				time.Sleep(2 * time.Second)
-				fmt.Println("Continuing")
+			resp, err := cfapi.Api.WriteWorkersKVBulk(context.Background(), namespaceID, payload)
+			if err != nil {
+				fmt.Printf("Error writing to API: %v\n", err)
+				ChunkUploadPayload(payload, cfapi.Api, &ctx, len(payload)/4, namespaceID)
+			} else {
+				fmt.Printf("%+v\n", resp)
 			}
 			payload = cloudflare.WorkersKVBulkWriteRequest{}
 		}
 		payload = append(payload, &record)
 	}
+	return nil
+}
 
-	fmt.Printf("Waiting for API calls to complete\n")
-	for {
-		if threads == 0 {
-			break
-		}
-		<-done
-		threads--
-		fmt.Printf("%d of %d API calls complete\n", threadsTotal-threads, threadsTotal)
-	}
+func (cf *CFAPI) WriteWorkersKV(ctx *context.Context, namespace, key string, value []byte) error {
+	// get freed request from channel
+	<-cf.RequestFreed
 
+	cf.Api.WriteWorkersKV(*ctx, namespace, key, value)
+	return nil
+}
+func (cfapi *CFAPI) KVSingleWrite(record cloudflare.WorkersKVPair, namespaceID string) error {
 	return nil
 }
 

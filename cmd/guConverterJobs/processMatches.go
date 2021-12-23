@@ -15,13 +15,8 @@ import (
 	"github.com/cloudflare/cloudflare-go"
 )
 
-func main() {
-	//Login to cloudflare
-	api, err := cfapi.New()
-	if err != nil {
-		panic(err)
-	}
-	kvRes, err := api.ReadWorkersKV(context.Background(), cfapi.GU_META, "matcheslastupdated")
+func ProcessMatches(cfapiw *cfapi.CFAPI) {
+	kvRes, err := cfapiw.Api.ReadWorkersKV(context.Background(), cfapi.GU_META, "matcheslastupdated")
 	if err != nil {
 		panic(err)
 	}
@@ -118,7 +113,7 @@ func main() {
 
 	//Write GU_MATCHES to cf kv
 	fmt.Println("Bulk writing GU_MATCHES to kv")
-	cfapi.ThreadedKVBulkWrite(api, gu_matches_kv, cfapi.GU_MATCHES)
+	cfapiw.KVBulkWrite(gu_matches_kv, cfapi.GU_MATCHES)
 
 	fmt.Println("Completed GU_MATCHES bulk write")
 	utils.PrintMemUsage()
@@ -132,7 +127,7 @@ func main() {
 		wg.Add(1)
 		go func(k int, v []string, ctx *context.Context, wg *sync.WaitGroup) {
 			//Check for existing record on cloudflare kv
-			res, err := api.ReadWorkersKV(*ctx, cfapi.GU_USER_MATCHES, strconv.FormatInt(int64(k), 10))
+			res, err := cfapiw.Api.ReadWorkersKV(*ctx, cfapi.GU_USER_MATCHES, strconv.FormatInt(int64(k), 10))
 			if err == nil {
 				//Record exists
 				var currentRecord []string
@@ -147,7 +142,7 @@ func main() {
 				if err != nil {
 					panic(err)
 				}
-				api.WriteWorkersKV(*ctx, cfapi.GU_USER_MATCHES, fmt.Sprintf("%d", k), currentRecordJson)
+				cfapiw.WriteWorkersKV(ctx, cfapi.GU_USER_MATCHES, strconv.FormatInt(int64(k), 10), currentRecordJson)
 			} else {
 				if err.Error() == cfapi.ERROR_NO_KEY_FOUND {
 					//Record does not exist, create it
@@ -155,7 +150,7 @@ func main() {
 					if err != nil {
 						panic(err)
 					}
-					api.WriteWorkersKV(*ctx, cfapi.GU_USER_MATCHES, fmt.Sprintf("%d", k), valueJSON)
+					cfapiw.WriteWorkersKV(ctx, cfapi.GU_USER_MATCHES, strconv.FormatInt(int64(k), 10), valueJSON)
 				} else {
 					//Something fucked happened
 					panic(err)
@@ -169,7 +164,10 @@ func main() {
 	utils.PrintMemUsage()
 	fmt.Println("Setting matcheslastupdated to current time")
 
+	fmt.Println("Waiting on wg")
+	wg.Wait()
+	fmt.Println("Done waiting on wg")
 	//Set last updated time
-	api.WriteWorkersKV(context.Background(), cfapi.GU_META, "matcheslastupdated", []byte(fmt.Sprintf("%d", lastUpdateTimeEnd)))
+	cfapiw.WriteWorkersKV(&ctx, cfapi.GU_META, "matcheslastupdated", []byte(fmt.Sprintf("%d", lastUpdateTimeEnd)))
 	fmt.Printf("Completed GU_MATCHES_BY_USER_ID bulk write\n")
 }
